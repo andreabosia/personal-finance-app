@@ -14,5 +14,5 @@ y = st.slider("Y", 0, 130, 10)
 inputs = {"operation": option, "x": x, "y": y}
 # When the user clicks on button it will fetch the API
 if st.button('Calculate'):
-    res = requests.post(url = "http://127.0.0.1:8008/calculate", data = json.dumps(inputs))
+    res = requests.post(url = "http://127.0.0.1:8000/calculate", data = json.dumps(inputs))
     st. subheader (f"Response from API & = {res.text}")
