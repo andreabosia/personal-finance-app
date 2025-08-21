@@ -1,0 +1,17 @@
+start venv:
+    source .app_venv/bin/activate
+
+pip install packages:
+
+    to safely bind packages to the python being used in the venv use python -m pip package_name instead of just pip install package_name
+
+run streamlit app:
+   streamlit run frontend/streamlit_app.py
+   python -m streamlit run frontend/streamlit_app.py
+
+stop streamlit app from terminal:
+    control + c
+
+
+
+
