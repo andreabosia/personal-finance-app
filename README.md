@@ -7,8 +7,8 @@ start venv:
     source .app_venv/bin/activate
 
 pip install packages:
-
-    to safely bind packages to the python being used in the venv use python -m pip package_name instead of just pip install package_name
+    to safely bind packages to the python being used in the venv use python -m pip install package_name instead of just pip install package_name
+    NOTE: square brackets are interpreted as a globbing pattern in zsh --> python -m pip install "camelot-py[cv]"
 
 run streamlit app:
    streamlit run frontend/streamlit_app.py

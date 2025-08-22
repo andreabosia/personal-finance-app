@@ -1,2 +1,4 @@
 .app_venv/
 .DS_Store
+data/
+explorations/
