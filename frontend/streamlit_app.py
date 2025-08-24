@@ -25,34 +25,57 @@ import altair as alt
 import os
 
 BACKEND_URL = "http://localhost:8000"
-CSV_PATH = "data/transactions.csv"
+CSV_PATH = "data/trusted/transactions.csv"
 
 st.set_page_config(page_title="Personal Finance App", layout="wide")
 
 # --- Sidebar navigation ---
 page = st.sidebar.radio("Navigation", ["Upload PDF", "View Charts & Table"])
 
+def fetch_banks():
+    r = requests.get(f"{BACKEND_URL}/banks", timeout=5)
+    r.raise_for_status()
+    return r.json()["banks"]
+
+# cache to avoid re-fetching on every rerun
+@st.cache_data(ttl=3600)
+def get_bank_choices():
+    banks = fetch_banks()
+    # show labels to the user, but keep keys to send to backend
+    labels = [b["label"] for b in banks]
+    key_by_label = {b["label"]: b["key"] for b in banks}
+    return labels, key_by_label
+
 # --- Page 1: Upload PDF ---
 if page == "Upload PDF":
     st.title("Upload Bank Statement PDF")
 
-    uploaded = st.file_uploader("Choose a PDF", type="pdf")
+    try:
+        labels, key_by_label = get_bank_choices()
+    except Exception as e:
+        st.error(f"Could not load banks from backend: {e}")
+        labels, key_by_label = ["Fineco", "UBS"], {"Fineco": "fineco", "UBS": "ubs"}  # fallback
 
-    if uploaded is not None:
+    bank_label = st.selectbox("Select bank", labels, index=None, placeholder="Choose a bank")
+    uploaded = st.file_uploader("Choose a PDF", type="pdf")
+    submit = st.button("Parse PDF")
+
+    if submit:
+        if uploaded is None:
+            st.warning("Please upload a PDF."); st.stop()
+        if not bank_label:
+            st.warning("Please select a bank."); st.stop()
+
+        bank_key = key_by_label[bank_label]  # <-- send key to backend
+        files = {"file": (uploaded.name, uploaded.getvalue(), "application/pdf")}
+        data = {"bank": bank_key}
         with st.spinner("Parsing PDF on backend..."):
-            files = {"file": (uploaded.name, uploaded.getvalue(), "application/pdf")}
-            resp = requests.post(f"{BACKEND_URL}/extract", files=files)
+            resp = requests.post(f"{BACKEND_URL}/extract", files=files, data=data)
 
         if not resp.ok:
             st.error(f"Backend request failed (HTTP {resp.status_code}).")
         else:
-            payload = {}
-            try:
-                payload = resp.json()
-            except Exception:
-                st.error(f"Backend did not return JSON:\n{resp.text[:500]}")
-                st.stop()
-
+            payload = resp.json()
             if payload.get("ok"):
                 st.success(
                     f"✅ Added {payload.get('rows_added', 0)} rows. "

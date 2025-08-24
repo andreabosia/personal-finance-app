@@ -1,40 +1,34 @@
-# from fastapi import FastAPI 
-# from pydantic import BaseModel
-# from backend.model_inference import calculate
-# class User_input(BaseModel) :
-#     operation : str
-#     x : float
-#     y : float
-
-# app = FastAPI()
-
-# @app.post("/calculate")
-# def operate(input:User_input):
-#     result = calculate (input.operation, input.x, input.y)
-#     return result
-
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
-import pandas as pd
-import os
+import pandas as pd, os
 
-from backend.transaction_extractor import TransactionExtractor, TransactionExtractorConfig
+from backend.extractor import TransactionExtractor
 
-app = FastAPI(title="Personal Finance Parser API")
+app = FastAPI()
+CSV_PATH = "data/trusted/transactions.csv"
 
-extractor = TransactionExtractor(TransactionExtractorConfig())
-CSV_PATH = "data/transactions.csv"
-os.makedirs("data", exist_ok=True)
+@app.get("/banks")
+def list_banks():
+    return {
+        "banks": [
+            {"key": key, "label": cls.DISPLAY_NAME}
+            for key, cls in TransactionExtractor._BANK_MAP.items()
+        ]
+    }
 
 @app.post("/extract")
-async def extract(file: UploadFile = File(...)):
+async def extract(
+    file: UploadFile = File(...),
+    bank: str = Form(...),
+):
     content = await file.read()
+
+    extractor = TransactionExtractor(bank=bank)
+
     df_new: pd.DataFrame = extractor.extract(content)
-
     if df_new.empty:
-        return JSONResponse(content={"ok": False, "msg": "No transactions found"})
+        return JSONResponse(content={"ok": False, "msg": f"No transactions found for bank={bank}"})
 
-    # If CSV already exists, append new rows
     if os.path.exists(CSV_PATH):
         df_existing = pd.read_csv(CSV_PATH, parse_dates=["data_operazione","data_valuta"])
         df_all = pd.concat([df_existing, df_new], ignore_index=True)
@@ -49,5 +43,6 @@ async def extract(file: UploadFile = File(...)):
             "rows_added": len(df_new),
             "total_rows": len(df_all),
             "csv_path": CSV_PATH,
+            "bank": bank,
         }
     )
