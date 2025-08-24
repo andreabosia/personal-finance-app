@@ -104,10 +104,14 @@ class TransactionExtractorFineco(TransactionExtractor):
         (?P<left_gap>\s+)
         (?P<amount>[0-9.'’ ]*,\d{2})
         (?P<right_gap>\s+)
-        (?P<descrizione>.+)$
+        (?P<descrizione>.+)$   
         """,
         re.VERBOSE,
     )
+    _DESCR_CLEAN_RE = re.compile(
+        r" ?Carta N\.\s*\*+\s*\d+\s*Data Operazione\s*\d{2}/\d{2}/\d{2}", 
+        re.IGNORECASE
+    )    
 
     def _parse_one_line(self, text: str) -> Optional[Dict[str, object]]:
         m = self._TXN_RE.match(text or "")
@@ -117,12 +121,17 @@ class TransactionExtractorFineco(TransactionExtractor):
         left_gap, right_gap = len(gd["left_gap"]), len(gd["right_gap"])
         is_entrata = (left_gap > 1) or (left_gap > right_gap)
         amount_f = self._ita_to_float(gd["amount"])
+
+        # clean description
+        descrizione = gd["descrizione"].strip()
+        descrizione = self._DESCR_CLEAN_RE.sub("", descrizione).strip()
+            
         rec = {
             "data_operazione": gd["data_operazione"],
             "data_valuta": gd["data_valuta"],
             "uscite": None if is_entrata else amount_f,
             "entrate": amount_f if is_entrata else None,
-            "descrizione": gd["descrizione"].strip(),
+            "descrizione": descrizione,
         }
         return rec
 
