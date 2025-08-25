@@ -21,7 +21,7 @@ remove from cache files that were tracked before adding them to gitignore:
     git rm --cached file_name
 
 run backend with FastAPI:
-    uvicorn backend.api_main:app 
+    uvicorn services.extractor_api.main:app 
 
 Swagger UI for API doc:
     http://127.0.0.1:8000/docs 

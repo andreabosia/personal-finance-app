@@ -1,30 +1,11 @@
-# import streamlit as st 
-# import json
-# import requests
-# st.title("Basic Caculator App")
-# # taking user inpputs
-# option = st.selectbox( 'What operation You want to perform?',
-#                     ('Addition', 'Subtraction', 'Multiplication', 'Division'))
-# st.write("")
-# st.write("Select the numbers from slider below")
-# x = st.slider("X", 0, 100, 20)
-# y = st.slider("Y", 0, 130, 10)
-
-# #converting the inputs into a json format
-# inputs = {"operation": option, "x": x, "y": y}
-# # When the user clicks on button it will fetch the API
-# if st.button('Calculate'):
-#     res = requests.post(url = "http://127.0.0.1:8000/calculate", data = json.dumps(inputs))
-#     st. subheader (f"Response from API & = {res.text}")
-
-
 import streamlit as st
 import requests
 import pandas as pd
 import altair as alt
 import os
 
-BACKEND_URL = "http://localhost:8000"
+BACKEND_URL = "http://localhost:8000"      # extractor_api
+PREPROC_URL = "http://localhost:8001"      # preprocessing_api
 CSV_PATH = "data/trusted/transactions.csv"
 
 st.set_page_config(page_title="Personal Finance App", layout="wide")
@@ -37,11 +18,9 @@ def fetch_banks():
     r.raise_for_status()
     return r.json()["banks"]
 
-# cache to avoid re-fetching on every rerun
 @st.cache_data(ttl=3600)
 def get_bank_choices():
     banks = fetch_banks()
-    # show labels to the user, but keep keys to send to backend
     labels = [b["label"] for b in banks]
     key_by_label = {b["label"]: b["key"] for b in banks}
     return labels, key_by_label
@@ -66,12 +45,12 @@ if page == "Upload PDF":
         if not bank_label:
             st.warning("Please select a bank."); st.stop()
 
-        bank_key = key_by_label[bank_label]  # <-- send key to backend
+        bank_key = key_by_label[bank_label]
         files = {"file": (uploaded.name, uploaded.getvalue(), "application/pdf")}
         data = {"bank": bank_key}
+
         with st.spinner("Parsing PDF on backend..."):
-            resp = requests.post(f"{BACKEND_URL}/extract", files=files, data=data)
-            #TODO add call to API to compute embeddings
+            resp = requests.post(f"{BACKEND_URL}/extract", files=files, data=data, timeout=60)
 
         if not resp.ok:
             st.error(f"Backend request failed (HTTP {resp.status_code}).")
@@ -81,11 +60,56 @@ if page == "Upload PDF":
                 st.success(
                     f"✅ Added {payload.get('rows_added', 0)} rows. "
                     f"Total rows: {payload.get('total_rows', 0)}.\n\n"
-                    f"Saved to: {payload.get('csv_path')}"
+                    f"Saved to: {payload.get('csv_path', CSV_PATH)}"
                 )
+
+                # ---- NEW: call preprocessing API to embed + compute similarities ----
+                # 1) try to get fresh transactions directly from extractor response
+                tx = payload.get("transactions")
+
+                # 2) fallback: re-read from CSV and build minimal schema
+                if not tx:
+                    try:
+                        df = pd.read_csv(payload.get("csv_path", CSV_PATH))
+                        # adapt these column names if yours differ
+                        needed_cols = {"transaction_id", "descrizione"}
+                        if not needed_cols.issubset(df.columns):
+                            # try common alternatives
+                            mapping = {}
+                            if "id" in df.columns: mapping["transaction_id"] = "id"
+                            if "merchant" in df.columns: mapping["descrizione"] = "descrizione"
+                            if mapping:
+                                df = df.rename(columns={v: k for k, v in mapping.items() if v in df.columns})
+                        tx = df[["transaction_id", "descrizione"]].dropna().to_dict(orient="records")
+                    except Exception as e:
+                        st.error(f"Could not prepare transactions for preprocessing: {e}")
+                        tx = None
+
+                if tx:
+                    pre_body = {
+                        "transactions": tx,
+                        # optionally send categories here if you want to update them now:
+                        # "categories": [{"category_id": "...", "category_text": "..."}],
+                        "compute_sims": True,
+                        "top_k": 5,
+                    }
+                    with st.spinner("Computing embeddings & similarities..."):
+                        try:
+                            pre_resp = requests.post(f"{PREPROC_URL}/preprocess", json=pre_body, timeout=120)
+                            if pre_resp.ok:
+                                pre_payload = pre_resp.json()
+                                st.success(f"Embeddings updated (model: {pre_payload.get('model_name')}).")
+                            else:
+                                st.warning(f"Preprocessing API returned HTTP {pre_resp.status_code}: {pre_resp.text}")
+                        except Exception as e:
+                            st.error(f"Preprocessing API call failed: {e}")
+                else:
+                    st.info("No transactions found to preprocess.")
+                # ---------------------------------------------------------------------
+
             else:
                 st.error(payload.get("msg", payload.get("error", "Unknown error")))
-
+                
 # --- Page 2: Charts & Table ---
 else:
     st.title("Expenses by Month + Full Table")

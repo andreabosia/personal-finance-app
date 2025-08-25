@@ -153,7 +153,7 @@ class MerchantCategoryPreprocessor:
         self,
         transactions_df: pd.DataFrame,
         transaction_id_col: str = "transaction_id",
-        merchant_text_col: str = "merchant_text",
+        merchant_text_col: str = "descrizione",
     ) -> pd.DataFrame:
         """
         Creates/updates the merchant embeddings parquet. Skips already embedded transactions
@@ -200,7 +200,7 @@ class MerchantCategoryPreprocessor:
         self,
         top_k: Optional[int] = None,
         transaction_id_col: str = "transaction_id",
-        merchant_text_col: str = "merchant_text",
+        merchant_text_col: str = "descrizione",
         category_id_col: str = "category_id",
         category_text_col: str = "category_text",
     ) -> pd.DataFrame:
