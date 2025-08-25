@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 import pandas as pd, os
 
-from backend.extractor import TransactionExtractor
+from backend.ingestion.extraction import TransactionExtractor
 
 app = FastAPI()
 CSV_PATH = "data/trusted/transactions.csv"

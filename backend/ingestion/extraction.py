@@ -4,16 +4,23 @@ from abc import ABC, abstractmethod
 import re, io
 import pdfplumber
 import pandas as pd
+import hashlib
 
-# -------------------------
-#NOTE Base Class is TransactionExtractor from which sublclss inherit (and implement the abstarct method). 
-# Factory design pattern to hide complexity of which extractor to adopt depending of the pdf (i.e. who calls the api, API_main, need not to know that there is a fineco and a ubs subclass, only neet to pass the right param.)
-# -------------------------
+
 class TransactionExtractor(ABC):
     """
-    Factory + Template:
-      TransactionExtractor(bank) -> returns a concrete subclass based on bank.
-      extract() -> _read_lines() -> subclass _parse_one_line() -> finalize.
+    Abstract base class for extracting transaction data from bank statement PDFs.
+    Factory design pattern to hide complexity of which extractor to adopt depending of the pdf (i.e. who calls the api, need not to know that there is a fineco 
+    and a ubs subclass, only neet to pass the right param.)
+
+    Implements a Factory + Template design pattern:
+      - Factory: TransactionExtractor(bank) returns a concrete subclass based on the bank name.
+      - Template: extract() provides a standard workflow for reading and parsing PDF content,
+        delegating line parsing to the subclass via the abstract _parse_one_line() method.
+
+    Subclasses must implement _parse_one_line() to handle bank-specific parsing logic.
+    The factory hides the complexity of which extractor to use, allowing clients to simply
+    specify the bank name.
     """
 
     _BANK_MAP = {}  # filled after subclasses are defined (otherwise would have not defined error here)
@@ -31,9 +38,27 @@ class TransactionExtractor(ABC):
     # ----  Public ----
     def extract(self, content: bytes) -> pd.DataFrame:
         df_lines = self._read_lines(content)
-        return self._parse_lines_to_transactions(df_lines)
-
+        df_txns = self._parse_lines_to_transactions(df_lines)
+        df_txns = self._add_id_column(df_txns)
+        return df_txns
+    
     # ---- Private ----
+    def _add_id_column(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Adds a unique 'id' column to the DataFrame based on transaction fields.
+        """
+        if df.empty:
+            df["id"] = []
+            return df
+
+        def make_id(row):
+            # Use relevant fields to generate a unique hash
+            base = f"{row.get('data_operazione','')}_{row.get('data_valuta','')}_{row.get('uscite','')}_{row.get('entrate','')}_{row.get('descrizione','')}_{self.bank}"
+            return hashlib.sha256(base.encode("utf-8")).hexdigest()
+
+        df["id"] = df.apply(make_id, axis=1)
+        return df
+
     def _read_lines(self, content: bytes) -> pd.DataFrame:
         lines_out: List[Dict[str, str]] = []
         with pdfplumber.open(io.BytesIO(content)) as pdf:

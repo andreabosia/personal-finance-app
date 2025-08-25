@@ -30,3 +30,72 @@ start server with fast API:
     for production use -> fastapi run backend/api_main.py
     for dev use -> python -m fastapi dev backend/api_main.py
     preffered way (to understand) -> uvicorn backend.api_main:app --reload
+
+
+
+
+Repository structure
+
+your-project/
+│── pyproject.toml           # poetry config (dependencies, metadata)
+│── poetry.lock
+│── docker-compose.yml       # orchestrates services locally (optional)
+│── README.md
+
+├── backend/                 # core business logic (independent of FastAPI/Streamlit)
+│   ├── ingestion/
+│   │   └── extraction.py    # PDF → tabular data
+│   │
+│   ├── preprocessing/
+│   │   └── preprocessing.py # merchant → embedding → similarity features
+│   │
+│   ├── training/
+│   │   ├── clustering_model.py  # TxClustering (BaseEstimator-style)
+│   │   └── train.py             # orchestrates fit/eval/save_artifacts
+│   │
+│   ├── inference/
+│   │   ├── predictor.py         # loads artifacts, exposes predict()
+│   │   └── preprocessing.py     # lightweight reuse of preprocessing at inference
+│   │
+│   └── common/                  # shared utils (used by both training & inference)
+│       ├── __init__.py
+│       ├── schema.py            # Pydantic input/output schemas
+│       ├── embeddings.py        # multilingual embedding loader + caching
+│       ├── similarity.py        # cosine similarity, distance utils
+│       ├── artifacts.py         # save/load model artifacts & metadata
+│       ├── logging.py           # shared logger config
+│       └── constants.py         # paths, env vars, model_version etc.
+
+├── services/                # FastAPI microservices (entrypoints)
+│   ├── extractor_api/
+│   │   ├── main.py          # FastAPI app for /extract
+│   │   └── Dockerfile
+│   │
+│   ├── training_api/
+│   │   ├── main.py          # FastAPI app for /train
+│   │   └── Dockerfile
+│   │
+│   └── inference_api/
+│       ├── main.py          # FastAPI app for /predict
+│       └── Dockerfile
+
+├── artifacts/               # persisted models, embeddings, metadata
+│   └── tx_clustering/
+│       └── 1.0.0/
+│           ├── pipeline.pkl
+│           ├── category_embeddings.pkl
+│           └── metadata.json
+
+└── tests/                   # pytest unit & integration tests
+    ├── test_ingestion.py
+    ├── test_preprocessing.py
+    ├── test_training.py
+    ├── test_inference.py
+    └── test_api.py
+|
+|
+|    
+└── frontend/                   # UI
+    ├── streamlit_app.py
+
+

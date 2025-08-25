@@ -71,6 +71,7 @@ if page == "Upload PDF":
         data = {"bank": bank_key}
         with st.spinner("Parsing PDF on backend..."):
             resp = requests.post(f"{BACKEND_URL}/extract", files=files, data=data)
+            #TODO add call to API to compute embeddings
 
         if not resp.ok:
             st.error(f"Backend request failed (HTTP {resp.status_code}).")
