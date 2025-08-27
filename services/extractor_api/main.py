@@ -7,6 +7,7 @@ from backend.ingestion.extraction import TransactionExtractor
 app = FastAPI()
 CSV_PATH = "data/trusted/transactions.csv"
 
+# enpoint invoked to dinamically fill in drop down options for banks (i.e. differnet extarctor invoked depending on the bank)
 @app.get("/banks")
 def list_banks():
     return {
@@ -16,6 +17,7 @@ def list_banks():
         ]
     }
 
+# endpoint receives uploaded pdf file and extracts transactions and appends to csv 
 @app.post("/extract")
 async def extract(
     file: UploadFile = File(...),

@@ -18,9 +18,10 @@ from sentence_transformers import SentenceTransformer
 # Config & helpers
 # -----------------------
 
-DEFAULT_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+DEFAULT_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 EMBEDDING_DIM_BY_MODEL = {
-    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 384,
+    #"sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2": 384
+    "sentence-transformers/paraphrase-multilingual-mpnet-base-v2": 768
 }
 
 def now_ts() -> int:

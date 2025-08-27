@@ -65,7 +65,7 @@ class TransactionExtractor(ABC):
             for page in pdf.pages:
                 for ln in (page.extract_text_lines(layout=True) or []):
                     text = (ln.get("text") or "")
-                    if not text.strip():
+                    if not text.strip():    # skip empty lines
                         continue
                     lines_out.append({"text": text})
         return pd.DataFrame(lines_out)
@@ -94,7 +94,7 @@ class TransactionExtractor(ABC):
 
     def _parse_lines_to_transactions(self, df_lines: pd.DataFrame) -> pd.DataFrame:
         if df_lines.empty or "text" not in df_lines.columns:
-            return pd.DataFrame(columns=["data_operazione","data_valuta","uscite","entrate","descrizione", "bank"])
+            return pd.DataFrame(columns=["data_operazione","data_valuta","ammontare","descrizione", "bank"])
 
         parsed = df_lines["text"].apply(self._parse_one_line)
         records = [r for r in parsed if r]
@@ -102,12 +102,12 @@ class TransactionExtractor(ABC):
 
         if out.empty:
             return out
-
+        # fomate dates
         for c in ("data_operazione", "data_valuta"):
             if c in out.columns:
                 out[c] = pd.to_datetime(out[c], format="%d.%m.%y", errors="coerce")
 
-        base_cols = ["data_operazione", "data_valuta", "uscite", "entrate", "descrizione"]
+        base_cols = ["data_operazione", "data_valuta", "ammontare", "descrizione"]
         cols = [c for c in base_cols]
         out[cols].reset_index(drop=True)
         out[self.bank] = self.bank 
@@ -154,8 +154,7 @@ class TransactionExtractorFineco(TransactionExtractor):
         rec = {
             "data_operazione": gd["data_operazione"],
             "data_valuta": gd["data_valuta"],
-            "uscite": None if is_entrata else amount_f,
-            "entrate": amount_f if is_entrata else None,
+            "ammontare": amount_f if is_entrata else -amount_f,
             "descrizione": descrizione,
         }
         return rec

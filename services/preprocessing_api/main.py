@@ -40,6 +40,7 @@ class PreprocessRequest(BaseModel):
 # ---- App ----
 app = FastAPI(title="Preprocessing API", version="1.0.0")
 
+# simply to ping endpoint
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "model_name": pp.model_name}
