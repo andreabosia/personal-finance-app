@@ -164,6 +164,7 @@ class TransactionExtractorFineco(TransactionExtractor):
 # UBS strategy (#TODO)
 # -------------------------
 class TransactionExtractorUBS(TransactionExtractor):
+    # Class attribute
     DISPLAY_NAME = "UBS"
 
     _TXN_RE = re.compile(r"")

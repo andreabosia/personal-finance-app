@@ -5,38 +5,56 @@ import numpy as np
 import altair as alt
 import os
 
-BACKEND_URL = "http://localhost:8000"      # extractor_api
-PREPROC_URL = "http://localhost:8001"      # preprocessing_api
-CSV_PATH = "data/trusted/transactions.csv"
+EXTRACTOR_API_URL = "http://localhost:8000"      # extractor_api
+CLASSIFIER_API_URL = os.getenv("CLASSIFIER_API_URL", "http://localhost:8002")   # classifier_api
+DEFAULT_CATEGORIES = ["groceries", "restaurants", "transport", "utilities", "shopping", "none"]
+# PREPROC_URL = "http://localhost:8001"      # preprocessing_api
+# TODO should be a default + user override
+CSV_PATH = "data/trusted/transactions.csv"  # where extractor saves/reads CSV
 
 st.set_page_config(page_title="Personal Finance App", layout="wide")
-
-# --- Sidebar navigation ---
+# -----------------------------------------------------------------------------------------------------
+# -------------------------- Sidebar navigation -------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------
 page = st.sidebar.radio("Navigation", ["Upload PDF", "View Charts & Table"])
 
-def fetch_banks():
-    r = requests.get(f"{BACKEND_URL}/banks", timeout=5)
-    r.raise_for_status()
-    return r.json()["banks"]
 
+# -----------------------------------------------------------------------------------------------------
+# --------------------------------------- Utils -------------------------------------------------------
+# -----------------------------------------------------------------------------------------------------
 @st.cache_data(ttl=3600)
-def get_bank_choices():
-    banks = fetch_banks()
-    labels = [b["label"] for b in banks]
-    key_by_label = {b["label"]: b["key"] for b in banks}
+def fetch_options_from_API(api_url: str, service: str):
+    r = requests.get(f"{api_url}/{service}", timeout=5)
+    r.raise_for_status()
+    options = r.json()[f"{service}"]
+    labels = [b["label"] for b in options]
+    # needed to map back label to correct class
+    key_by_label = {b["label"]: b["key"] for b in options}
     return labels, key_by_label
 
-# --- Page 1: Upload PDF ---
+# -----------------------------------------------------------------------------------------------------
+# ----------------- Page 1: Upload PDF, extract CSV, classify transactions ----------------------------
+# -----------------------------------------------------------------------------------------------------
 if page == "Upload PDF":
     st.title("Upload Bank Statement PDF")
-
+    # Fetch available extractors (depending on bank)
+    # if none is available, we cannot proceed -> stop execution
     try:
-        labels, key_by_label = get_bank_choices()
+        extractor_labels, extractor_key_by_label = fetch_options_from_API(api_url=EXTRACTOR_API_URL, service="banks")
     except Exception as e:
-        st.error(f"Could not load banks from backend: {e}")
-        labels, key_by_label = ["Fineco", "UBS"], {"Fineco": "fineco", "UBS": "ubs"}  # fallback
+        st.error(f"Could not load extractor options from backend: {e}"); st.stop()
+    # Fetch available transactions classifiers
+    #TODO if none is available, do we want to proceed anyway instead?
+    try:
+        classifier_labels, classifier_key_by_label = fetch_options_from_API(api_url=CLASSIFIER_API_URL, service="classifiers")
+    except Exception as e:
+        st.error(f"Could not load extractor options from backend: {e}"); st.stop()
 
-    bank_label = st.selectbox("Select bank", labels, index=None, placeholder="Choose a bank")
+
+    # select bank to use for parsing
+    bank_label = st.selectbox("Select bank", extractor_labels, index=None, placeholder="Choose a bank")
+    # select model to use for classification
+    classifier_label = st.selectbox("Select classifer", classifier_labels, index=None, placeholder="Choose a classifer")
     uploaded = st.file_uploader("Choose a PDF", type="pdf")
     submit = st.button("Parse PDF")
 
@@ -45,13 +63,17 @@ if page == "Upload PDF":
             st.warning("Please upload a PDF."); st.stop()
         if not bank_label:
             st.warning("Please select a bank."); st.stop()
+        if not classifier_label:
+            st.warning("Please select a classifier."); st.stop()            
 
-        bank_key = key_by_label[bank_label]
+        bank_key = extractor_key_by_label[bank_label]
         files = {"file": (uploaded.name, uploaded.getvalue(), "application/pdf")}
         data = {"bank": bank_key}
 
         with st.spinner("Parsing PDF on backend..."):
-            resp = requests.post(f"{BACKEND_URL}/extract", files=files, data=data, timeout=60)
+            # ----- Call the extractor API -----
+            #TODO should be a try execpt with error handling
+            resp = requests.post(f"{EXTRACTOR_API_URL}/extract", files=files, data=data, timeout=60)
 
         if not resp.ok:
             st.error(f"Backend request failed (HTTP {resp.status_code}).")
@@ -64,22 +86,12 @@ if page == "Upload PDF":
                     f"Saved to: {payload.get('csv_path', CSV_PATH)}"
                 )
 
-                # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-                # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 
-
-            # ---- NEW: call LLM classifier API ----
-            # expects:
-            #   - CLASSIFIER_URL = "http://localhost:8000"  (or wherever your API runs)
-            #   - categories: List[str] (e.g., from a widget)
-            #   - optional llm settings (backend/model_name/temperature/max_new_tokens)
-
-            CLASSIFIER_URL = os.getenv("CLASSIFIER_URL", "http://localhost:8002")
-            DEFAULT_CATEGORIES = ["groceries", "restaurants", "transport", "utilities", "shopping", "none"]
+            # ---- Call (LLM) classifier API ----
 
             # you can wire this to Streamlit inputs; here we just fall back to defaults
-            categories = DEFAULT_CATEGORIES#payload.get("categories") or DEFAULT_CATEGORIES
+            categories = DEFAULT_CATEGORIES #payload.get("categories") or DEFAULT_CATEGORIES
             backend = payload.get("backend", "ollama")        # or "hf"
             model_name = payload.get("model_name", "mistral") # e.g., "llama3.1:8b" for Ollama
             temperature = float(payload.get("temperature", 0.0))
@@ -123,7 +135,7 @@ if page == "Upload PDF":
 
                 with st.spinner("Classifying transactions with LLM..."):
                     try:
-                        resp = requests.post(f"{CLASSIFIER_URL}/classify_records", json=req_body, timeout=180)
+                        resp = requests.post(f"{CLASSIFIER_API_URL}/classify_records", json=req_body, timeout=180)
                         if not resp.ok:
                             st.warning(f"Classifier API returned HTTP {resp.status_code}: {resp.text}")
                         else:

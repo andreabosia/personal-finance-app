@@ -28,6 +28,16 @@ class ClassifyJSONRequest(BaseModel):
     temperature: Optional[float] = 0.0
     max_new_tokens: Optional[int] = 64
 
+# enpoint invoked to dinamically fill in drop down options for banks (i.e. differnet extarctor invoked depending on the bank)
+@app.get("/classifers")
+def list_clasifers():
+    return {
+        "classifer": [
+            {"key": key, "label": cls.DISPLAY_NAME}
+            for key, cls in TransactionExtractor._CLASSIFIER_MAP.items()
+        ]
+    }
+
 
 @app.post("/classify_records")
 def classify_records(req: ClassifyJSONRequest):
