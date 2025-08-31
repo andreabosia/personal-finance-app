@@ -1,1 +1,0 @@
-This is were I will persist the trained clustering model, the computed embeddings
