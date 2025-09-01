@@ -9,12 +9,32 @@ This module implements an embedding-based classifier strategy using pre-trained 
 It defines the EmbeddingAnchorClassifier class, which encodes input texts and compares them to predefined
 class anchors using cosine similarity. The configuration for the classifier is encapsulated in the EmbeddingAnchorConfig
 dataclass.
+e.g.
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--embedder_id", default="sentence-transformers/all-MiniLM-L6-v2")
+    p.add_argument("--class_anchors", default {"groceries": ["Esselunga","Unes"], "restaurants": ["ristorante","trattoria"]}, type=json.loads)
+    p.add_argument("--normalize", default=True, type=bool)
+    p.add_argument("--aggregate", default="max")
+    p.add_argument("--top_k_debug", default=5,type=int)
+    args = p.parse_args()
+    cfg = EmbeddingAnchorConfig(
+                    embedder_id=args.embedder_id,
+                    class_anchors=args.class_anchors,
+                    normalize=args.normalize,
+                    aggregate=args.aggregate,
+                    top_k_debug=args.top_k_debug)
+    model = EmbeddingAnchorClassifier(cfg)
+    res = model.predict_one(ClassificationRequest(text="I bought groceries at Esselunga"))
+if name == "__main__":
+    main()
 """
 
 @dataclass
 class EmbeddingAnchorConfig:
     """
     Configuration for the EmbeddingAnchorClassifier.
+    Instead of using a complex dictionary-based config, I use a dataclass for simplicity and type safety.
     Attributes:
         embedder_id: The identifier of the pre-trained sentence transformer model to use.
         class_anchors: A dictionary mapping class labels to lists of anchor texts.
@@ -33,6 +53,7 @@ class EmbeddingAnchorClassifier(ClassifierStrategy):
     An embedding-based classifier that uses pre-defined anchor texts for each class.
     It encodes the input text and computes cosine similarities to the anchor embeddings.
     The class with the highest similarity score is assigned to the input text.
+    The object is initialized with an EmbeddingAnchorConfig instance.
     """
     def __init__(self, cfg: EmbeddingAnchorConfig):
         if not cfg.class_anchors: raise ValueError("class_anchors required")
@@ -49,6 +70,14 @@ class EmbeddingAnchorClassifier(ClassifierStrategy):
     def config(self) -> Any: return asdict(self._cfg)
 
     def _cosine(self, a, b):
+        """
+        Computes cosine similarity between two sets of vectors.
+        Note: If vectors are normalised then dot product is equivalent to cosine similarity.
+        Args:
+            a: A 2D numpy array of shape (m, d)
+            b: A 2D numpy array of shape (n, d)
+        Returns:
+            A 2D numpy array of shape (m, n) with cosine similarities."""
         if not self._cfg.normalize:
             a = a / (np.linalg.norm(a, axis=-1, keepdims=True) + 1e-12)
             b = b / (np.linalg.norm(b, axis=-1, keepdims=True) + 1e-12)
@@ -61,10 +90,15 @@ class EmbeddingAnchorClassifier(ClassifierStrategy):
         for lbl, s in zip(self._labels, sims):
             buckets.setdefault(lbl, []).append(float(s))
         scores = {k: (max(v) if self._cfg.aggregate=="max" else float(np.mean(v))) for k,v in buckets.items()}
-        classes = [ClassScore(k, v) for k, v in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)]
+        score_per_class = [ClassScore(k, v) for k, v in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)]
         top_idx = np.argsort(sims)[::-1][: self._cfg.top_k_debug]
-        raw = {"top_k_anchors":[{"label": self._labels[i], "similarity": float(sims[i])} for i in top_idx]}
-        return ClassificationResult(strategy_name=self.name, classes=classes, raw=raw)
+        raw = {
+            "top_k_anchors": [
+                {"label": self._labels[i], "similarity": float(sims[i])} 
+                for i in top_idx
+                ]
+            }
+        return ClassificationResult(strategy_name=self.name, classes=score_per_class, raw=raw)
     
     # def predict_batch(self, reqs: Iterable[ClassificationRequest]) -> List[ClassificationResult]:
     #     req_list = list(reqs)
