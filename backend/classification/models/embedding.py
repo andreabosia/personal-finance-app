@@ -4,6 +4,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from backend.classification.models.utils import ClassificationRequest, ClassificationResult, ClassScore
 from backend.classification.models.base import ClassifierStrategy
+import pandas as pd
 """
 This module implements an embedding-based classifier strategy using pre-trained sentence transformers.
 It defines the EmbeddingAnchorClassifier class, which encodes input texts and compares them to predefined
@@ -82,7 +83,38 @@ class EmbeddingAnchorClassifier(ClassifierStrategy):
             a = a / (np.linalg.norm(a, axis=-1, keepdims=True) + 1e-12)
             b = b / (np.linalg.norm(b, axis=-1, keepdims=True) + 1e-12)
         return a @ b.T
+    
+    def predict(self, x: pd.Series) -> pd.Series:
+        """
+        Vectorized prediction for a Series of texts.
+        Args:
+            x: pandas.Series of input texts.
+        Returns:
+            pandas.Series of predicted class labels.
+        """
+        texts = x.tolist()
+        Q = self._model.encode(texts, normalize_embeddings=self._cfg.normalize)  # (B, d)
+        S = self._cosine(Q, self._anchors)  # (B, n_anchors)
 
+        lbl_array = np.array(self._labels)
+        unique_labels = list(self._cfg.class_anchors.keys())
+        label_to_indices = {lbl: np.where(lbl_array == lbl)[0] for lbl in unique_labels}
+
+        agg_cols = []
+        for lbl in unique_labels:
+            idx = label_to_indices[lbl]
+            slice_ = S[:, idx] if idx.size > 0 else np.full((S.shape[0], 1), -np.inf)
+            if self._cfg.aggregate == "mean":
+                v = slice_.mean(axis=1)
+            else:
+                v = slice_.max(axis=1)
+            agg_cols.append(v)
+        M = np.vstack(agg_cols).T  # (B, L)
+
+        pred_indices = np.argmax(M, axis=1)
+        y = pd.Series([unique_labels[i] for i in pred_indices], index=x.index)
+        return y
+       
     def predict_one(self, req: ClassificationRequest) -> ClassificationResult:
         q = self._model.encode([req.text], normalize_embeddings=self._cfg.normalize)  # (1,d)
         sims = self._cosine(q, self._anchors)[0]

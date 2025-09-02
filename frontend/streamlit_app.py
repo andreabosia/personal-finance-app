@@ -15,7 +15,7 @@ DEFAULT_MODELS = ["embedding", "zero_shot"]
 # Where extractor saves the base CSV
 CSV_PATH = "data/trusted/transactions.csv"
 # Where we save the enriched CSV with categories merged in
-ENRICHED_CSV_PATH = "data/trusted/transactions_enriched.csv"
+ENRICHED_CSV_PATH = "data/trusted/transactions_classified.csv"
 
 st.set_page_config(page_title="Personal Finance App", layout="wide")
 
@@ -85,12 +85,12 @@ if page == "Upload PDF":
     bank_label = st.selectbox("Select bank", extractor_labels, index=None, placeholder="Choose a bank")
 
     # Let user pick which models to run (optional)
-    with st.expander("Models to use for classification"):
-        chosen_models = st.multiselect(
-            "Select models",
-            options=DEFAULT_MODELS,
-            default=DEFAULT_MODELS
-        )
+    # with st.expander("Models to use for classification"):
+    #     chosen_models = st.multiselect(
+    #         "Select models",
+    #         options=DEFAULT_MODELS,
+    #         default=DEFAULT_MODELS
+    #     )
 
     uploaded = st.file_uploader("Choose a PDF", type="pdf")
     submit = st.button("Parse & Classify")
@@ -128,54 +128,56 @@ if page == "Upload PDF":
         )
 
         # ----- 2) Classify via Classifier API (CSVJob JSON body) -----
-        job = {
-            "csv_path": csv_path,
-            "models": chosen_models or DEFAULT_MODELS,
-            "id_col": "id",
-            "merchant_col": "descrizione" if "descrizione" in pd.read_csv(csv_path, nrows=1).columns else "merchant",
-            "amount_col": "ammontare",  # optional, ignored by your endpoint but OK to send
-        }
 
-        with st.spinner("Classifying transactions on backend..."):
-            cls_resp = requests.post(f"{CLASSIFIER_API_URL}/classify/csv", json=job, timeout=180)
+        # job = {
+        #     "csv_path": csv_path,
+        #     "models": chosen_models or DEFAULT_MODELS,
+        #     "id_col": "id",
+        #     "merchant_col": "descrizione" if "descrizione" in pd.read_csv(csv_path, nrows=1).columns else "merchant",
+        #     "amount_col": "ammontare",  # optional, ignored by your endpoint but OK to send
+        # }
 
-        if not cls_resp.ok:
-            st.error(f"Classifier failed (HTTP {cls_resp.status_code}).")
-            st.stop()
+        # with st.spinner("Classifying transactions on backend..."):
+        #     cls_resp = requests.post(f"{CLASSIFIER_API_URL}/classify/csv", json=job, timeout=180)
 
-        cls_payload = cls_resp.json()
-        st.info(
-            f"🧠 Classified new rows: {cls_payload.get('classified_new_rows', 0)} "
-            f"with strategies: {', '.join([s['name'] for s in cls_payload.get('strategies', [])])}"
-        )
+        # if not cls_resp.ok:
+        #     st.error(f"Classifier failed (HTTP {cls_resp.status_code}).")
+        #     st.stop()
+
+        # cls_payload = cls_resp.json()
+        # st.info(
+        #     f"🧠 Classified new rows: {cls_payload.get('classified_new_rows', 0)} "
+        #     f"with strategies: {', '.join([s['name'] for s in cls_payload.get('strategies', [])])}"
+        # )
 
         # ----- 3) Merge categories back into CSV & persist enriched file -----
-        join_job = {
-            "csv_path": csv_path,
-            "id_col": "id",     # from your earlier normalization step
-            "out_path": None               # let backend pick "<base>_enriched.csv"
-        }
-        with st.spinner("Joining classifications into CSV..."):
-            join_resp = requests.post(f"{CLASSIFIER_API_URL}/classify/join", json=join_job, timeout=120)
+        # join_job = {
+        #     "csv_path": csv_path,
+        #     "id_col": "id",     # from your earlier normalization step
+        #     "out_path": None               # let backend pick "<base>_enriched.csv"
+        # }
+        # with st.spinner("Joining classifications into CSV..."):
+        #     join_resp = requests.post(f"{CLASSIFIER_API_URL}/classify/join", json=join_job, timeout=120)
 
-        if not join_resp.ok:
-            st.error(f"Join failed (HTTP {join_resp.status_code}): {join_resp.text}")
-            st.stop()
+        # if not join_resp.ok:
+        #     st.error(f"Join failed (HTTP {join_resp.status_code}): {join_resp.text}")
+        #     st.stop()
 
-        join_payload = join_resp.json()
-        enriched_path = join_payload.get("enriched_path")
-        if enriched_path:
-            st.success(
-                f"📁 Enriched CSV ready: {enriched_path}  "
-                f"(matched {join_payload.get('tx_with_classification', 0)} of {join_payload.get('tx_in_csv', 0)} rows)"
-            )
-        else:
-            st.warning("Join succeeded but no enriched_path was returned.")
+        # join_payload = join_resp.json()
+        # enriched_path = join_payload.get("enriched_path")
+        # if enriched_path:
+        #     st.success(
+        #         f"📁 Enriched CSV ready: {enriched_path}  "
+        #         f"(matched {join_payload.get('tx_with_classification', 0)} of {join_payload.get('tx_in_csv', 0)} rows)"
+        #     )
+        # else:
+        #     st.warning("Join succeeded but no enriched_path was returned.")
 
 
 # ---------------- Page 2: Charts & Table -----------------
 else:
     st.title("Expenses by Month + Full Table")
+    requests.post(f"{CLASSIFIER_API_URL}/classify_transactions", timeout=180)
 
     read_path = ENRICHED_CSV_PATH if os.path.exists(ENRICHED_CSV_PATH) else CSV_PATH
     if not os.path.exists(read_path):
@@ -191,8 +193,8 @@ else:
         df["ammontare"] = 0.0
 
     # Ensure category column exists (fallback)
-    if "category" not in df.columns:
-        df["category"] = "none"
+    if "pred_embedding" not in df.columns:
+        df["pred_embedding"] = "none"
 
     # Month bucket
     df["month"] = df["data_operazione"].dt.to_period("M").dt.to_timestamp()
@@ -231,13 +233,13 @@ else:
         st.subheader("Quick Stats")
         st.metric("Rows", len(df))
         st.metric("Total Amount", f"{df['ammontare'].sum():,.2f}")
-        st.metric("# Categories", df["category"].nunique())
+        st.metric("# Categories", df["pred_embedding"].nunique())
 
-    # ---------------- Chart: Amount per Category (Pie) ----------------
+    # ---------------- Chart: Amount per pred_embedding (Pie) ----------------
     st.subheader("Totale per Categoria")
 
     df_cat_total = (
-        df.groupby("category", as_index=False)["ammontare"]
+        df.groupby("pred_embedding", as_index=False)["ammontare"]
         .sum()
         .sort_values("ammontare", ascending=False)
     )
@@ -247,19 +249,41 @@ else:
         .mark_arc()
         .encode(
             theta=alt.Theta("ammontare:Q", title="Total Amount"),
-            color=alt.Color("category:N", legend=alt.Legend(title="Category")),
+            color=alt.Color("pred_embedding:N", legend=alt.Legend(title="category")),
             tooltip=[
-                alt.Tooltip("category:N", title="Category"),
+                alt.Tooltip("pred_embedding:N", title="category"),
                 alt.Tooltip("ammontare:Q", title="Total Amount", format=",.2f"),
             ],
         )
     )
 
     st.altair_chart(chart_cat_pie, use_container_width=True)
+    # ---------------- Chart: Amount per pred_embedding over time (Bar) ----------------
+    st.subheader("Andamento Mensile per Categoria")
+    df_cat_monthly = (
+        df.groupby(["month", "pred_embedding"], as_index=False)["ammontare"]
+        .sum()
+        .sort_values(["month", "ammontare"], ascending=[True, False])
+    )
+    chart_cat_monthly = (
+        alt.Chart(df_cat_monthly)
+        .mark_bar()
+        .encode(
+            x=alt.X("yearmonth(month):T", title="Month"),
+            y=alt.Y("ammontare:Q", title="Amount"),
+            color=alt.Color("pred_embedding:N", legend=alt.Legend(title="category")),
+            tooltip=[
+                alt.Tooltip("yearmonth(month):T", title="Month"),
+                alt.Tooltip("pred_embedding:N", title="category"),
+                alt.Tooltip("ammontare:Q", title="Amount", format=",.2f"),
+            ],
+        )
+    )
+    st.altair_chart(chart_cat_monthly, use_container_width=True)
 
     # ---------------- Table & Download ----------------
     st.subheader("All Transactions")
-    df_show = df.sort_values(["data_operazione"]).reset_index(drop=True)[["data_valuta","ammontare","descrizione","category","score"]]
+    df_show = df.sort_values(["data_operazione"]).reset_index(drop=True)[["data_valuta","ammontare","descrizione","pred_embedding"]]
     st.dataframe(df_show, use_container_width=True)
 
     st.download_button(
