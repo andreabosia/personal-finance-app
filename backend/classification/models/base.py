@@ -2,13 +2,13 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Iterable, List
 import json, hashlib
-from backend.classification.models.utils import ClassificationRequest, ClassificationResult
+import pandas as pd
 
 """
 This module defines the base interface for classifier strategies used in the personal finance app's classification system.
 It includes the ClassifierStrategy abstract base class, which specifies the required properties and methods that all
 classifier strategies must implement. The module also provides a utility function for generating unique signatures
-based on the strategy's name and configuration.
+based on the strategy's name and configuration (usefull for model tracking).
 """
 
 def sha1_short(obj: Any) -> str:
@@ -33,7 +33,5 @@ class ClassifierStrategy:
     def config(self) -> Any: raise NotImplementedError
     @property
     def signature(self) -> str: return sha1_short({"strategy": self.name, "config": self.config})
-    def predict_one(self, req: ClassificationRequest) -> ClassificationResult: raise NotImplementedError
-    def predict_batch(self, reqs: Iterable[ClassificationRequest]) -> List[ClassificationResult]:
-        return [self.predict_one(r) for r in reqs]
-    
+
+    #def predict(self, X: pd.Series) -> pd.Series: raise NotImplementedError

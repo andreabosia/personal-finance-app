@@ -1,11 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 import pandas as pd, os
 
 from backend.ingestion.extraction import TransactionExtractor
+from backend.ingestion import db as dbdal
 
 app = FastAPI()
-CSV_PATH = "data/trusted/transactions.csv"
 
 # enpoint invoked to dinamically fill in drop down options for banks (i.e. differnet extarctor invoked depending on the bank)
 @app.get("/banks")
@@ -17,34 +17,21 @@ def list_banks():
         ]
     }
 
-# endpoint receives uploaded pdf file and extracts transactions and appends to csv 
-@app.post("/extract")
-async def extract(
-    file: UploadFile = File(...),
-    bank: str = Form(...),
-):
+# endpoint to ingest a PDF file for a given bank
+@app.post("/extract/{bank}")
+async def ingest(bank: str, file: UploadFile):
+    """Accept a PDF, parse it, save to SQLite."""
+    if not file:
+        raise HTTPException(status_code=400, detail="file is required (multipart/form-data)")
+    # try:
+    dbdal.init_db()
     content = await file.read()
-
-    extractor = TransactionExtractor(bank=bank)
-
-    df_new: pd.DataFrame = extractor.extract(content)
-    if df_new.empty:
-        return JSONResponse(content={"ok": False, "msg": f"No transactions found for bank={bank}"})
-
-    if os.path.exists(CSV_PATH):
-        df_existing = pd.read_csv(CSV_PATH, parse_dates=["data_operazione","data_valuta"])
-        df_all = pd.concat([df_existing, df_new], ignore_index=True)
-    else:
-        df_all = df_new
-
-    df_all.to_csv(CSV_PATH, index=False)
-
-    return JSONResponse(
-        content={
-            "ok": True,
-            "rows_added": len(df_new),
-            "total_rows": len(df_all),
-            "csv_path": CSV_PATH,
-            "bank": bank,
-        }
-    )
+    extractor = TransactionExtractor(bank)
+    df = extractor.extract(content)  # wrapper on your base class
+    extractor.save_to_db(df)
+    #TODO "total_rows": len(df),
+    return {"ok": True, "bank": bank, "ingested": int(len(df))}
+    # except ValueError as e:
+    #     raise HTTPException(status_code=400, detail=str(e))
+    # except Exception as e:
+    #     raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")

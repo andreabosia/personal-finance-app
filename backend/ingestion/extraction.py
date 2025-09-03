@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Optional, Dict, List
 from abc import ABC, abstractmethod
+from backend.ingestion.db import upsert_transactions_df
 import re, io
 import pdfplumber
 import pandas as pd
@@ -42,22 +43,45 @@ class TransactionExtractor(ABC):
         df_txns = self._add_id_column(df_txns)
         return df_txns
     
+    def save_to_db(self, df: pd.DataFrame) -> None:
+        """
+        Upsert transactions into SQLite (idempotent on id).
+        """
+        if df.empty:
+            return
+        # ensure required columns exist
+        needed = {"id","bank","data_operazione","data_valuta","ammontare","descrizione"}
+        missing = needed - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing required columns: {missing}")
+        upsert_transactions_df(df)
+    
     # ---- Private ----
     def _add_id_column(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Adds a unique 'id' column to the DataFrame based on transaction fields.
+        Adds a unique id column to the transactions DataFrame.
+        The id is a SHA-256 hash of key transaction fields and the bank name,
+        ensuring uniqueness across multiple uploads and banks.
         """
         if df.empty:
             df["id"] = []
             return df
 
         def make_id(row):
-            # Use relevant fields to generate a unique hash
-            base = f"{row.get('data_operazione','')}_{row.get('data_valuta','')}_{row.get('uscite','')}_{row.get('entrate','')}_{row.get('descrizione','')}_{self.bank}"
+            # stringify robustly (dates → ISO) and include bank
+            parts = [
+                str(row.get("data_operazione") or ""),
+                str(row.get("data_valuta") or ""),
+                str(row.get("ammontare") or ""),
+                str(row.get("descrizione") or ""),
+                self.bank,
+            ]
+            base = "|".join(parts)
             return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
+        df = df.copy()
         df["id"] = df.apply(make_id, axis=1)
-        return df
+        return df   
 
     def _read_lines(self, content: bytes) -> pd.DataFrame:
         lines_out: List[Dict[str, str]] = []
@@ -106,11 +130,10 @@ class TransactionExtractor(ABC):
         for c in ("data_operazione", "data_valuta"):
             if c in out.columns:
                 out[c] = pd.to_datetime(out[c], format="%d.%m.%y", errors="coerce")
-
-        base_cols = ["data_operazione", "data_valuta", "ammontare", "descrizione"]
+        out["bank"] = self.bank
+        base_cols = ["data_operazione", "data_valuta", "ammontare", "descrizione", "bank"]
         cols = [c for c in base_cols]
         out[cols].reset_index(drop=True)
-        out[self.bank] = self.bank 
         return out
 
 
@@ -164,10 +187,10 @@ class TransactionExtractorFineco(TransactionExtractor):
 # UBS strategy (#TODO)
 # -------------------------
 class TransactionExtractorUBS(TransactionExtractor):
-    # Class attribute
     DISPLAY_NAME = "UBS"
 
-    _TXN_RE = re.compile(r"")
+    def __init__(self, bank: str):
+        raise NotImplementedError("Transaction extraction for UBS is not implemented yet.")
 
     def _parse_one_line(self, text: str) -> Optional[Dict[str, object]]:
         return
