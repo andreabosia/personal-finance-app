@@ -52,7 +52,7 @@ def get_models() -> List[Dict]:
     Ask classifier_api for available models (name + signature).
     Requires a small `/models` endpoint on classifier_api (see below).
     """
-    r = requests.get(f"{CLASSIFIER_API_URL}/models", timeout=5)
+    r = requests.get(f"{CLASSIFIER_API_URL}/models", timeout=20)
     r.raise_for_status()
     return r.json()["models"]
 
