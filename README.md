@@ -31,6 +31,65 @@ start server with fast API:
     for dev use -> python -m fastapi dev backend/api_main.py
     preffered way (to understand) -> uvicorn backend.api_main:app --reload
 
+##
+DOCKERIZING
+
+1) After creating a requirments.in for each fast API (with only the needed dependencies) run the following to create the requirments.txt for such api
+    pip-compile services/extractor_api/requirements.in \
+        -o services/extractor_api/requirements.txt
+
+2) Building a docker image for each API:
+
+    “Build a Docker image using the file services/extractor_api/Dockerfile, name/tag it pfa-extractor:dev, and use the current repo as the build context so the COPY instructions can find the code.”
+
+    docker build -f services/extractor_api/Dockerfile -t personal-finance-app-extractor:dev .
+
+3) we use a Bind mount instead of a named volume so that we can see th .db on the host (my pc) instead of being embedded in Docker. So we run the image with the mounted bin volume.
+    mkdir -p ./data
+    docker run --rm -p 8000:8000 \
+    -e DB_PATH=/data/results.db \
+    -v "$(pwd)/data:/data" \
+    personal-finance-app-extractor:dev
+
+3.1)
+    run one image at a time after creating a network
+
+    NOTE: Without it You’d have to hard-code IP addresses (which change every time you restart), or expose all ports to your host and use host.docker.internal.With it Your services are isolated from the rest of your machine, but can discover each other by name reliably.
+
+    docker network create pfa-net
+
+    docker run -d --rm --name extractor \
+        --network pfa-net \
+        -p 8000:8000 \
+        -e DB_PATH=/data/trusted/results.db \
+        -v "$(pwd)/data:/data" \
+        personal-finance-app-extractor:dev
+    
+    docker run -d --rm --name classifier \
+        --network pfa-net \
+        -p 8001:8001 \
+        -e DB_PATH=/data/trusted/results.db \
+        -e MODEL_CONFIG_YAML=/app/backend/classification/artifacts/model_config.yaml \
+        -v "$(pwd)/data:/data" \
+        -v "$(pwd)/hf_cache:/root/.cache/huggingface" \
+        personal-finance-app-classifier:dev
+
+    docker run --rm --name frontend \
+        --network pfa-net \
+        -p 8501:8501 \
+        -e EXTRACTOR_API_URL=http://extractor:8000 \
+        -e CLASSIFIER_API_URL=http://classifier:8001 \
+        personal-finance-app-frontend:dev
+
+    open the app from browser --> http://localhost:8501
+
+4) instead of point 3.1 orchestrate using docker-compose
+    docker compose up -d       # start all
+    docker compose ps          # see status
+    docker compose logs -f     # tail logs
+
+    docker compose down            # stop
+    docker compose down -v         # stop + remove named volumes (not needed here since we bind-mount ./data)    
 
 
 

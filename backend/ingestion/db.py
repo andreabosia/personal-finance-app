@@ -1,15 +1,15 @@
-# backend/ingestion/db.py
 import sqlite3
 import os
+from pathlib import Path
 from datetime import datetime, timezone
 import pandas as pd
 from typing import List, Dict, Any, Optional
 
-DB_PATH = os.path.abspath("data/trusted/results.db")
-os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+DB_PATH = Path(os.getenv("DB_PATH", "/data/trusted/results.db")).resolve()
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 def get_conn():
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(str(DB_PATH))
 
 def init_db():
     with get_conn() as conn:
