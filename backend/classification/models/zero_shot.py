@@ -9,7 +9,7 @@ class ZeroShotConfig:
     hf_model_id: str = "facebook/bart-large-mnli"
     candidate_labels: List[str] = field(default_factory=list)
     multi_label: bool = False
-    hypothesis_template: str = "This text is about {}."
+    hypothesis_template: str = "Classify the merchnt into one of the possible categories {}."
 
 class ZeroShotClassifier(ClassifierStrategy):
     def __init__(self, cfg: ZeroShotConfig):
