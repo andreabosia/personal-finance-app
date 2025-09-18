@@ -7,7 +7,7 @@ COPY frontend/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # 2) Copy just the frontend code (and anything it imports directly)
-COPY frontend /app/frontend
+# COPY frontend /app/frontend
 
 # 3) Expose Streamlit port
 EXPOSE 8501

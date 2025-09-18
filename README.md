@@ -133,12 +133,15 @@ personal-finance-app/
 5. Instead of point 4 we can orchestrate all such steps using docker-compose. Useful commands:
 
     ```sh
+    docker compose build          # only once if containers not already built
     docker compose up -d       # start all
     docker compose ps          # see status
     docker compose logs -f     # tail logs
     docker compose down        # stop
     ```
 
+
+ALternativelly for dev we can mount the code base as a volume so that updates are reflected in the containers.
 
 ---
 

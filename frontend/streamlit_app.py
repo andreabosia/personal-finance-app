@@ -7,6 +7,10 @@ import numpy as np
 import altair as alt
 import os
 from typing import Dict, List, Tuple
+import altair as alt
+from itertools import product
+import tempfile
+
 
 EXTRACTOR_API_URL = os.getenv("EXTRACTOR_API_URL", "http://localhost:8000")
 CLASSIFIER_API_URL = os.getenv("CLASSIFIER_API_URL", "http://localhost:8001")
@@ -18,7 +22,7 @@ DEFAULT_MODEL_YAML = os.getenv(
 )
 st.session_state.setdefault("last_update", 0)
 st.set_page_config(page_title="Personal Finance App", layout="wide")
-page = st.sidebar.radio("Navigation", ["Upload PDF", "View Charts & Table"], key="nav")
+page = st.sidebar.radio("Navigation", ["Upload PDF", "View Charts & Table", "Capital Projections"] , key="nav")
 
 # ------------------------------- Helpers ---------------------------------
 
@@ -150,10 +154,9 @@ if page == "Upload PDF":
         st.success("Done! Go to 'View Charts & Table' to explore.")
         st.session_state["last_update"] = int(time.time())
 
-
 # ----------------------------- Page 2 ------------------------------------
 
-else:
+elif page == "View Charts & Table":
     st.title("Charts & Table")
 
     # 1) Model picker (required before showing charts)
@@ -249,25 +252,42 @@ else:
         st.metric("Total Amount", f"{df['ammontare'].sum():,.2f}")
         st.metric("# Categories", df[pred_col].nunique())
 
-    # ---------------- Pie: Totale per Categoria ----------------
-    st.subheader("Totale per Categoria")
-    df_cat_total = (
-        df.groupby(pred_col, as_index=False)["ammontare"]
-          .sum()
-          .sort_values("ammontare", ascending=False)
+    # ---------------- Pie: Media mensile per Categoria ----------------
+    st.subheader("Spesa Media Mensile per Categoria")
+
+
+    monthly = (
+        df.groupby(["month", pred_col], as_index=False)["ammontare"]
+        .sum()
     )
+
+    all_months = monthly["month"].drop_duplicates().sort_values()
+    pivot = (
+        monthly.pivot(index="month", columns=pred_col, values="ammontare")
+            .reindex(all_months)
+            .fillna(0.0)
+    )
+
+    avg_per_cat = (
+        pivot.mean(axis=0)
+            .reset_index()
+            .rename(columns={"index": pred_col, 0: "ammontare_avg_month"})
+    )
+    avg_per_cat.columns = [pred_col, "ammontare_avg_month"]
+
     chart_cat_pie = (
-        alt.Chart(df_cat_total)
+        alt.Chart(avg_per_cat)
         .mark_arc()
         .encode(
-            theta=alt.Theta("ammontare:Q", title="Total Amount"),
-            color=alt.Color(f"{pred_col}:N", legend=alt.Legend(title="category")),
+            theta=alt.Theta("ammontare_avg_month:Q", title="Avg Amount per Month"),
+            color=alt.Color(f"{pred_col}:N", legend=alt.Legend(title="Category")),
             tooltip=[
-                alt.Tooltip(f"{pred_col}:N", title="category"),
-                alt.Tooltip("ammontare:Q", title="Total Amount", format=",.2f"),
+                alt.Tooltip(f"{pred_col}:N", title="Category"),
+                alt.Tooltip("ammontare_avg_month:Q", title="Avg/Month", format=",.2f")
             ],
         )
     )
+
     st.altair_chart(chart_cat_pie, use_container_width=True)
 
     # ---------------- Bars: Andamento Mensile per Categoria ---------------
@@ -304,3 +324,216 @@ else:
         file_name=f"transactions_with_{model_sig[:8]}.csv",
         mime="text/csv",
     )
+
+# ----------------------------- Page 3 ------------------------------------
+elif page == "Capital Projections":
+
+
+    st.set_page_config(page_title="Capital Projections", layout="wide")
+
+    # ---------- Helpers ----------
+    def fv_with_contributions(
+        principal: float,
+        contribution: float,
+        years: float,
+        r_annual: float,
+        comp_per_year: int = 12,
+    ) -> float:
+        """
+        Future value with regular contributions.
+        principal: initial capital (P)
+        contribution: contribution per contribution-period (PMT)
+        years: total years (t)
+        r_annual: nominal annual rate in decimal (e.g., 0.07)
+        comp_per_year: compounding/contribution frequency (m)
+        """
+        m = comp_per_year
+        r = r_annual
+        i = r / m
+        n = int(round(m * years))
+
+        # If rate is ~0, avoid division by zero: FV = P + PMT*n (+ shift for begin timing)
+        if abs(i) < 1e-12:
+            fv = principal + contribution * n
+            return fv
+
+        # Growth of principal
+        fv_principal = principal * (1 + i) ** n
+
+        # Growth of contributions (ordinary annuity)
+        fv_pmt = contribution * (((1 + i) ** n - 1) / i)
+
+        
+        fv_pmt *= (1 + i)
+
+        return fv_principal + fv_pmt
+
+
+    def apply_inflation_adjustment(series: pd.Series, inflation_annual: float, comp_per_year: int) -> pd.Series:
+        """Deflate nominal values to today's money with the same compounding frequency."""
+        if inflation_annual <= 0:
+            return series
+        i = inflation_annual / comp_per_year
+        idx = np.arange(len(series))  # 0..n
+        deflator = (1 + i) ** idx
+        return series / deflator
+
+
+    # ---------- UI ----------
+    st.title("💹 Capital Projections (Interactive)")
+
+    with st.sidebar:
+        st.header("Global Settings")
+
+        annual_return = st.number_input("Annual return (%, nominal)", min_value=-50.0, max_value=50.0, value=7.0, step=0.1) / 100.0
+        comp_per_year = st.selectbox("Compounding frequency", options=[1, 2, 4, 12], index=3)
+        inflation = st.number_input("Inflation (%, optional, real value output)", min_value=0.0, max_value=50.0, value=0.0, step=0.1) / 100.0
+
+        st.markdown("---")
+        st.subheader("Scenarios")
+        init_capitals_str = st.text_input(
+            "Initial capital (comma-separated, e.g. 13000, 50000, 100000)",
+            value="13000"
+        )
+        try:
+            init_capitals = [float(x.strip().replace("’", "").replace("_", "")) for x in init_capitals_str.split(",") if x.strip()]
+        except Exception:
+            st.warning("Please enter valid numbers separated by commas.")
+            init_capitals = []
+
+        monthly_savings_str = st.text_input(
+            "Monthly saving (comma-separated, e.g. 500, 1000)",
+            value="2000"
+        )
+        try:
+            monthly_savings = [float(x.strip().replace("’", "").replace("_", "")) for x in monthly_savings_str.split(",") if x.strip()]
+        except Exception:
+            st.warning("Please enter valid numbers separated by commas.")
+            monthly_savings = []
+
+        max_years = st.slider("Projection horizon (years)", min_value=1, max_value=50, value=30, step=1)
+        year_step = st.select_slider("Year step", options=[1, 2, 5, 10], value=5)
+
+        st.markdown("---")
+        show_table = st.checkbox("Show data table", value=False)
+
+    if not init_capitals or not monthly_savings:
+        st.info("Pick at least one **Initial capital** and one **Monthly saving** in the sidebar.")
+        st.stop()
+
+    years_list = list(range(0, max_years + 1, year_step))
+    if years_list[0] != 0:
+        years_list = [0] + years_list
+
+    # ---------- Compute ----------
+    rows = []
+    for P, PMT in product(init_capitals, monthly_savings):
+        nominal_values = []
+        for y in years_list:
+            fv = fv_with_contributions(
+                principal=P,
+                contribution=PMT,
+                years=y,
+                r_annual=annual_return,
+                comp_per_year=comp_per_year
+            )
+            nominal_values.append(fv)
+
+        series = pd.Series(nominal_values, index=years_list)
+        real_series = apply_inflation_adjustment(series, inflation, comp_per_year)
+
+        for y in years_list:
+            rows.append({
+                "Years": y,
+                "Initial Capital": P,
+                "Monthly Saving": PMT,
+                "Projected Capital (Nominal)": series.loc[y],
+                "Projected Capital (Inflation Adj.)"   : real_series.loc[y],
+            })
+
+    df = pd.DataFrame(rows)
+
+
+    df["Scenario"] = (
+        "Init " + df["Initial Capital"].map(lambda x: f"{int(x):,}").str.replace(",", "’") +
+        " | Save " + df["Monthly Saving"].map(lambda x: f"{int(x):,}").str.replace(",", "’")
+    )
+
+    # ---------- Charts ----------
+
+    chart = (
+        alt.Chart(df)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("Years:Q", title="Years"),
+            y=alt.Y("Projected Capital (Nominal):Q", title="Projected Capital", axis=alt.Axis(format="~s")),
+            color=alt.Color("Scenario:N", title="Scenario"),
+            tooltip=[
+                alt.Tooltip("Years:Q"),
+                alt.Tooltip("Initial Capital:Q", format="~s"),
+                alt.Tooltip("Monthly Saving:Q", format="~s"),
+                alt.Tooltip("Projected Capital (Nominal):Q", format="~s")
+            ],
+        )
+        .properties(height=520)
+        .interactive()
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+    # ---------- Table ----------
+    if show_table:
+        st.markdown("### Data")
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+    # ---------- Old static version (for reference) ----------
+    # st.title("Capital Projections")
+
+    # initial_capital = [13000, 1000000]#, 500000]
+    # monthly_saving = [500, 1000, 2000, 3000, 4000, 10000]
+    # capital_projection = []
+
+    # for capital in initial_capital:
+    #     for saving in monthly_saving:
+    #         for year in range(0, 30, 5):
+    #             capital_proj = (
+    #                 capital * (1 + (0.07/12))**(year*12)
+    #                 + saving * (((1 + (0.07/12))**(year*12) - 1) / (0.07/12))
+    #             )
+    #             capital_projection.append((saving, year, capital, capital_proj))
+
+    # df_projection = pd.DataFrame(
+    #     capital_projection,
+    #     columns=["Monthly Saving", "Years", "Initial Capital", "Projected Capital"]
+    # )
+
+    # # add a combined label for color+stroke style
+    # df_projection["Scenario"] = (
+    #     "Init " + df_projection["Initial Capital"].astype(str)
+    #     + " | Save " + df_projection["Monthly Saving"].astype(str)
+    # )
+
+    # chart = (
+    #     alt.Chart(df_projection)
+    #     .mark_line(point=True)
+    #     .encode(
+    #         x=alt.X("Years:O", title="Years"),
+    #         y=alt.Y("Projected Capital:Q", title="Projected Capital (€)"),
+    #         color=alt.Color("Scenario:N", legend=alt.Legend(title="Scenario")),
+    #         strokeDash=alt.StrokeDash("Monthly Saving:Q"),  # <-- different line style too
+    #         tooltip=[
+    #             alt.Tooltip("Scenario:N", title="Scenario"),
+    #             alt.Tooltip("Years:O", title="Years"),
+    #             alt.Tooltip("Projected Capital:Q", title="Projected Capital (€)", format=",.2f"),
+    #         ],
+    #     )
+    #     .properties(width=700, height=400, title="Capital Projection Over Time")
+    # )
+
+    # st.altair_chart(chart, use_container_width=True)
+    
+    # # Legend table: Monthly Saving, Years, Projected Capital
+    # st.subheader("Projection Details")
+    # legend_df = df_projection.copy()
+    # legend_df["Projected Capital"] = legend_df["Projected Capital"].map(lambda x: f"€{x:,.2f}")
+    # st.dataframe(legend_df, use_container_width=True)

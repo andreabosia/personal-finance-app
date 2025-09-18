@@ -1,31 +1,97 @@
+# Version with repo backed in (needs re-built on code changes)
+# services:
+#   extractor_api:
+#     image: personal-finance-app-extractor:dev
+#     environment:
+#       DB_PATH: /data/trusted/results.db
+#     volumes:
+#       - ./data:/data
+#     ports:
+#       - "8000:8000"
+
+#   classifier_api:
+#     image: personal-finance-app-classifier:dev
+#     environment:
+#       DB_PATH: /data/trusted/results.db
+#       MODEL_CONFIG_YAML: /app/backend/classification/artifacts/model_config.yaml
+#     volumes:
+#       - ./data:/data
+#       - ./hf_cache:/root/.cache/huggingface
+#     ports:
+#       - "8001:8001"
+#     depends_on:
+#       - extractor_api
+
+#   frontend:
+#     image: personal-finance-app-frontend:dev
+#     environment:
+#       EXTRACTOR_API_URL: http://extractor_api:8000
+#       CLASSIFIER_API_URL: http://classifier_api:8001
+#     ports:
+#       - "8501:8501"
+#     depends_on:
+#       - extractor_api
+#       - classifier_api
+
+version: "3.9"
+
 services:
   extractor_api:
-    image: personal-finance-app-extractor:dev
+    build:
+      context: .
+      dockerfile: services/extractor_api/Dockerfile
+    container_name: extractor_api
     environment:
       DB_PATH: /data/trusted/results.db
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app        
     volumes:
+      - ./services:/app/services          # mount services
+      - ./backend:/app/backend            # mount shared backend lib
       - ./data:/data
+    working_dir: /app/services/extractor_api
+    command: uvicorn main:app --reload --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
 
   classifier_api:
-    image: personal-finance-app-classifier:dev
+    build:
+      context: .
+      dockerfile: services/classifier_api/Dockerfile   # <-- fixed path
+    container_name: classifier_api
     environment:
       DB_PATH: /data/trusted/results.db
       MODEL_CONFIG_YAML: /app/backend/classification/artifacts/model_config.yaml
+      PYTHONUNBUFFERED: "1"
+      PYTHONPATH: /app
     volumes:
+      - ./services:/app/services
+      - ./backend:/app/backend
       - ./data:/data
       - ./hf_cache:/root/.cache/huggingface
+    working_dir: /app/services/classifier_api
+    command: uvicorn main:app --reload --host 0.0.0.0 --port 8001
     ports:
       - "8001:8001"
     depends_on:
       - extractor_api
 
   frontend:
-    image: personal-finance-app-frontend:dev
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: frontend_app
     environment:
       EXTRACTOR_API_URL: http://extractor_api:8000
       CLASSIFIER_API_URL: http://classifier_api:8001
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./frontend:/app/frontend
+    command: >
+      streamlit run frontend/streamlit_app.py
+      --server.port=8501
+      --server.address=0.0.0.0
+      --server.runOnSave true
     ports:
       - "8501:8501"
     depends_on:

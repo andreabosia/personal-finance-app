@@ -4,10 +4,10 @@ WORKDIR /app
 COPY services/classifier_api/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-COPY backend/__init__.py /app/backend/__init__.py
-COPY backend/ingestion /app/backend/ingestion
-COPY backend/classification /app/backend/classification
-COPY services/classifier_api /app/services/classifier_api
+# COPY backend/__init__.py /app/backend/__init__.py
+# COPY backend/ingestion /app/backend/ingestion
+# COPY backend/classification /app/backend/classification
+# COPY services/classifier_api /app/services/classifier_api
 
 RUN mkdir -p /data
 EXPOSE 8001
