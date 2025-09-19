@@ -87,6 +87,7 @@ services:
       PYTHONUNBUFFERED: "1"
     volumes:
       - ./frontend:/app/frontend
+      - ./backend/classification/artifacts:/app/backend/classification/artifacts
     command: >
       streamlit run frontend/streamlit_app.py
       --server.port=8501

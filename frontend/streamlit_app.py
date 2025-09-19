@@ -15,10 +15,9 @@ import tempfile
 EXTRACTOR_API_URL = os.getenv("EXTRACTOR_API_URL", "http://localhost:8000")
 CLASSIFIER_API_URL = os.getenv("CLASSIFIER_API_URL", "http://localhost:8001")
 
-# Your default YAML path (the classifier API can also read from an env var)
 DEFAULT_MODEL_YAML = os.getenv(
     "MODEL_CONFIG_YAML",
-    "backend/classification/artifacts/model_config.yaml"
+    "/app/backend/classification/artifacts/model_config.yaml"
 )
 st.session_state.setdefault("last_update", 0)
 st.set_page_config(page_title="Personal Finance App", layout="wide")
@@ -51,14 +50,11 @@ def get_banks() -> Tuple[List[str], Dict[str, str]]:
     return labels, key_by_label
 
 @st.cache_data(ttl=600)
-def get_models() -> List[Dict]:
-    """
-    Ask classifier_api for available models (name + signature).
-    Requires a small `/models` endpoint on classifier_api (see below).
-    """
+def get_models(_refresh: int = 0) -> list[dict]:
     r = requests.get(f"{CLASSIFIER_API_URL}/models", timeout=20)
     r.raise_for_status()
-    return r.json()["models"]
+    payload = r.json()
+    return payload.get("models", [])
 
 def call_ingest(bank_key: str, file_name: str, content: bytes) -> Dict:
     files = {"file": (file_name, content, "application/pdf")}
@@ -66,37 +62,49 @@ def call_ingest(bank_key: str, file_name: str, content: bytes) -> Dict:
     r.raise_for_status()
     return r.json()
 
-def call_classify(model_config_path: str, batch_size: int = 512) -> Dict:
+def call_classify(uploaded_yaml: bytes | None, batch_size: int = 512) -> Dict:
     """
-    Triggers classification for all models in YAML.
-    The endpoint returns a summary with model_signature and how many rows were labeled now.
+    If uploaded_yaml is provided, send it as a multipart file.
+    Otherwise, call endpoint without a file so the API uses its default.
     """
-    params = {"model_config_path": model_config_path, "batch_size": batch_size}
-    r = requests.post(f"{CLASSIFIER_API_URL}/classify_transactions", params=params, timeout=300)
+    url = f"{CLASSIFIER_API_URL}/classify_transactions"
+
+    if uploaded_yaml is not None:
+        files = {"model_config_file": ("config.yaml", uploaded_yaml, "application/x-yaml")}
+        data = {"batch_size": str(batch_size), "merchant_col": "descrizione"}
+        r = requests.post(url, files=files, data=data, timeout=300)
+    else:
+        # No file -> rely on server default env MODEL_CONFIG_YAML
+        data = {"batch_size": str(batch_size), "merchant_col": "descrizione"}
+        r = requests.post(url, data=data, timeout=300)
+
     r.raise_for_status()
     return r.json()
 
 @st.cache_data(ttl=300)
 def fetch_joined_df(model_signature: str, refresh_token: int) -> pd.DataFrame:
-    """
-    Pull transactions joined with predictions for a specific model signature.
-    Tries JSON endpoint `/export_df`, falls back to CSV `/export.csv`.
-    """
-    # Prefer JSON
+    # Try JSON first
     try:
-        r = requests.get(f"{CLASSIFIER_API_URL}/export_df", params={"model_signature": model_signature}, timeout=20)
-        if _ok(r):
+        r = requests.get(
+            f"{CLASSIFIER_API_URL}/export_df",
+            params={"model_signature": model_signature},
+            timeout=20
+        )
+        if r.ok:
             rows = r.json()["rows"]
             return pd.DataFrame(rows)
     except Exception:
         pass
 
-    # Fallback: CSV
-    r = requests.get(f"{CLASSIFIER_API_URL}/export.csv", params={"model_signature": model_signature}, timeout=20)
+    # Fallback to CSV
+    r = requests.get(
+        f"{CLASSIFIER_API_URL}/export.csv",
+        params={"model_signature": model_signature},
+        timeout=20
+    )
     r.raise_for_status()
     from io import StringIO
     return pd.read_csv(StringIO(r.text), parse_dates=["data_operazione", "data_valuta"])
-
 
 # ----------------------------- Page 1 ------------------------------------
 
@@ -107,19 +115,18 @@ if page == "Upload PDF":
     bank_labels, bank_key_by_label = get_banks()
     bank_label = st.selectbox("Select bank", bank_labels, index=None, placeholder="Choose a bank")
 
-    # File uploader
-    uploaded = st.file_uploader("Choose a PDF", type="pdf")
 
-    # Optionally allow a custom YAML path (defaults to env)
-    with st.expander("Advanced"):
-        model_yaml = st.text_input("Model config YAML path", value=DEFAULT_MODEL_YAML)
-        batch_size = st.slider("Batch size", 64, 2000, 512, step=64)
+    raw_data_uploaded = st.file_uploader("Upload your Bank Statement", type="pdf")
+    model_config_uploaded = st.file_uploader(
+        "Upload a custom config YAML or use the default config.",
+        type="yaml"
+    )
 
     if st.button("Parse & Classify"):
         if not bank_label:
             st.warning("Please select a bank.")
             st.stop()
-        if uploaded is None:
+        if raw_data_uploaded is None:
             st.warning("Please upload a PDF.")
             st.stop()
 
@@ -128,17 +135,18 @@ if page == "Upload PDF":
         # (1) Ingest
         with st.spinner("Parsing PDF on backend and saving to DB..."):
             try:
-                payload = call_ingest(bank_key, uploaded.name, uploaded.getvalue())
+                payload = call_ingest(bank_key, raw_data_uploaded.name, raw_data_uploaded.getvalue())
             except Exception as e:
                 st.error(f"Extractor failed: {e}")
                 st.stop()
 
         st.success(f"✅ Ingested {payload.get('ingested', 0)} rows for {bank_label}.")
 
-        # (2) Classify (predict-only-missing per model in YAML)
-        with st.spinner("Running classification (only missing rows per model)..."):
+        # (2) Classify
+        with st.spinner("Running classification (only new rows)..."):
             try:
-                cls_summary = call_classify(model_yaml, batch_size=batch_size)
+                uploaded_yaml_bytes = model_config_uploaded.getvalue() if model_config_uploaded else None
+                cls_summary = call_classify(uploaded_yaml_bytes)
             except Exception as e:
                 st.error(f"Classifier failed: {e}")
                 st.stop()
@@ -157,25 +165,31 @@ if page == "Upload PDF":
 # ----------------------------- Page 2 ------------------------------------
 
 elif page == "View Charts & Table":
+    st.session_state["last_update"] = st.session_state.get("last_update", 0) + 1
+    get_models.clear()           # clear cached /models list
     st.title("Charts & Table")
 
     # 1) Model picker (required before showing charts)
     try:
-        models = get_models()
+        models = get_models(st.session_state.get("last_update", 0))
     except Exception as e:
-        st.error(f"Could not load models from classifier API: {e}")
+        st.error(f"Error fetching models from db: {e}")
         st.stop()
 
     # Build label -> signature map for UI
     if not models:
-        st.warning("No models available. Run classification once from Page 1.")
+        st.warning("No data available. Run classification once from Page 1.")
         st.stop()
+    st.session_state["last_update"] = st.session_state.get("last_update", 0) + 1
+    labels = [
+        f"{m['model_signature'][:8]} • {m.get('n_predictions', 0)} preds • "
+        f"{m.get('last_predicted_at','')}"
+        for m in models
+    ]
+    sig_by_label = {lbl: m["model_signature"] for lbl, m in zip(labels, models)}
 
-    model_labels = [f"{m.get('name','model')} — signature: {m['model_signature'][:8]}" for m in models]
-    sig_by_label = {lbl: m["model_signature"] for lbl, m in zip(model_labels, models)}
-
-    chosen = st.selectbox("Choose model", model_labels, index=0)
-    model_sig = sig_by_label[chosen]
+    chosen_label = st.selectbox("Choose model (signature)", labels, index=0)
+    model_sig = sig_by_label[chosen_label]
 
     # 2) Load joined data for chosen model
     with st.spinner("Loading data from DB..."):

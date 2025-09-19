@@ -29,7 +29,6 @@ async def ingest(bank: str, file: UploadFile):
     extractor = TransactionExtractor(bank)
     df = extractor.extract(content)  # wrapper on your base class
     extractor.save_to_db(df)
-    #TODO "total_rows": len(df),
     return {"ok": True, "bank": bank, "ingested": int(len(df))}
     # except ValueError as e:
     #     raise HTTPException(status_code=400, detail=str(e))

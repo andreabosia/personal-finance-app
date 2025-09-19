@@ -101,10 +101,25 @@ def join_with_predictions(model_signature: str) -> pd.DataFrame:
     sql = """
     SELECT t.*, p.label, p.score, p.predicted_at
     FROM transactions t
-    LEFT JOIN predictions p
-      ON p.id = t.id AND p.model_signature = ?
+    INNER JOIN predictions p
+      ON p.id = t.id
+     AND p.model_signature = ?
     """
     with get_conn() as conn:
         return pd.read_sql(sql, conn, params=(model_signature,))
     
 
+def list_model_signatures() -> pd.DataFrame:
+    init_db()
+    sql = """
+    SELECT
+      model_signature,
+      COUNT(*) AS n_predictions,
+      MAX(predicted_at) AS last_predicted_at
+    FROM predictions
+    GROUP BY model_signature
+    ORDER BY last_predicted_at DESC NULLS LAST
+    """
+    with get_conn() as conn:
+        return pd.read_sql(sql, conn)
+    

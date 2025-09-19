@@ -27,8 +27,29 @@ def load_model_from_yaml(yaml_path: str):
             raise ValueError(f"Unsupported model type in YAML: {key}")
     return classifiers_list
 
-def orchestrate_db(
-    model_config_path: str,
+def load_models_from_cfg_dict(cfg_dict: Dict[str, Any]) -> List[Any]:
+    """
+    Build classifiers from an already-parsed YAML dict.
+    """
+    classifiers: List[Any] = []
+    for key, cfg in (cfg_dict or {}).items():
+        if key.lower() == "embeddingconfig":
+            model_config = EmbeddingAnchorConfig(**cfg)
+            model = EmbeddingAnchorClassifier(model_config)
+            classifiers.append(model)
+        else:
+            raise ValueError(f"Unsupported model type in YAML: {key}")
+    return classifiers
+
+def load_models_from_yaml_bytes(yaml_bytes: bytes) -> List[Any]:
+    """
+    Build classifiers directly from YAML bytes (no temp file).
+    """
+    cfg_dict = yaml.safe_load(yaml_bytes.decode("utf-8")) or {}
+    return load_models_from_cfg_dict(cfg_dict)
+
+def orchestrate_db_from_classifiers(
+    classifiers: Iterable[Any],
     merchant_col: str = "descrizione",
     batch_size: int = 512,
 ) -> list[dict[str, Any]]:
@@ -40,10 +61,10 @@ def orchestrate_db(
       - upsert to predictions(id, model_signature, label, score?, predicted_at)
     Returns a summary list: [{"model_signature": ..., "predicted_rows": n}, ...]
     """
+    from backend.ingestion import db as dal  # local import to avoid cycles
     dal.init_db()
-    classifiers = load_model_from_yaml(model_config_path)
-    summary: list[dict[str, Any]] = []
 
+    summary: list[dict[str, Any]] = []
     for clf in classifiers:
         model_sig = getattr(clf, "signature", clf.__class__.__name__)
         df_unlabeled = dal.fetch_unlabeled_for_model(model_sig)
@@ -54,29 +75,12 @@ def orchestrate_db(
         total = 0
         for start in range(0, len(df_unlabeled), batch_size):
             block = df_unlabeled.iloc[start : start + batch_size]
-            # ensure column exists
             if merchant_col not in block.columns:
                 raise KeyError(f"Column '{merchant_col}' not found in transactions.")
-
-            labels = clf.predict(block[merchant_col])  # expects pd.Series -> pd.Series/list
-            # OPTIONAL: scores = clf.predict_proba(block[merchant_col])
-
-            payload = [
-                {"id": rid, "label": lab}
-                for rid, lab in zip(block["id"], labels)
-            ]
+            labels = clf.predict(block[merchant_col])
+            payload = [{"id": rid, "label": lab} for rid, lab in zip(block["id"], labels)]
             dal.upsert_predictions(model_sig, payload)
             total += len(block)
 
         summary.append({"model_signature": model_sig, "predicted_rows": total})
-
     return summary
-
-if __name__ == "__main__":
-    # defaults: adjust to your repo paths or pass via CLI/env
-    DEFAULT_YAML = os.environ.get(
-        "MODEL_CONFIG_YAML",
-        "/Users/andreabosia/Projects/personal-finance-app/backend/classification/artifacts/model_config.yaml",
-    )
-    out = orchestrate_db(DEFAULT_YAML)
-    print(out)
