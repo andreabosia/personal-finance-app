@@ -263,11 +263,10 @@ elif page == "View Charts & Table":
     with right:
         st.subheader("Quick Stats")
         st.metric("Rows", len(df))
-        st.metric("Total Amount", f"{df['ammontare'].sum():,.2f}")
         st.metric("# Categories", df[pred_col].nunique())
 
-    # ---------------- Pie: Media mensile per Categoria ----------------
-    st.subheader("Spesa Media Mensile per Categoria")
+    # ---------------- Pie: Avarge Monthly Amount per Category ----------------
+    st.subheader("Avarge Monthly Amount per Category")
 
 
     monthly = (
@@ -304,8 +303,8 @@ elif page == "View Charts & Table":
 
     st.altair_chart(chart_cat_pie, use_container_width=True)
 
-    # ---------------- Bars: Andamento Mensile per Categoria ---------------
-    st.subheader("Andamento Mensile per Categoria")
+    # ---------------- Bars: Monthly Amount per Category ---------------
+    st.subheader("Monthly Amount per Category")
     df_cat_monthly = (
         df.groupby(["month", pred_col], as_index=False)["ammontare"]
           .sum()
