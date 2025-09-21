@@ -5,7 +5,7 @@
 This repository contains a web application for tracking personal expenses and budgeting. It features a Streamlit UI, FastAPI microservices for extraction and classification, and a SQLite database for storage. The app leverages machine learning models (transformers) for transaction classification and uses pdfplumber for PDF parsing. Docker and Docker Compose are used for reproducibility and deployment.
 
 ![Alt text](readme_assets/page_1.png)
-![Alt text](readme_assets/page_2.png)
+![Alt text](readme_assets/page_2.jpg)
 ![Alt text](readme_assets/page_3.png)
 
 **Tech Stack:**
