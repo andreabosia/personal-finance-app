@@ -110,7 +110,6 @@ def join_with_predictions(model_signature: str) -> pd.DataFrame:
     with get_conn() as conn:
         return pd.read_sql(sql, conn, params=(model_signature,))
     
-
 def list_model_signatures() -> pd.DataFrame:
     init_db()
     sql = """

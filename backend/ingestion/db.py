@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 import pandas as pd
 from typing import List, Dict, Any, Optional
 
-DB_PATH = Path(os.getenv("DB_PATH", "/data/trusted/results.db")).resolve()
+
+# Default is used so that I can run from notebooks in exploration
+DEFAULT_DB = Path(__file__).resolve().parents[2] / ".data" / "results.db"
+
+DB_PATH = Path(os.getenv("DB_PATH", str(DEFAULT_DB))).resolve()
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 def get_conn():

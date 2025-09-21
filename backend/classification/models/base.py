@@ -34,4 +34,4 @@ class ClassifierStrategy:
     @property
     def signature(self) -> str: return sha1_short({"strategy": self.name, "config": self.config})
 
-    #def predict(self, X: pd.Series) -> pd.Series: raise NotImplementedError
+    def predict(self, X: pd.Series) -> pd.Series: raise NotImplementedError

@@ -27,7 +27,7 @@ async def ingest(bank: str, file: UploadFile):
     dbdal.init_db()
     content = await file.read()
     extractor = TransactionExtractor(bank)
-    df = extractor.extract(content)  # wrapper on your base class
+    df = extractor.extract(content)
     extractor.save_to_db(df)
     return {"ok": True, "bank": bank, "ingested": int(len(df))}
     # except ValueError as e:
